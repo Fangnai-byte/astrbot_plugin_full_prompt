@@ -1,0 +1,14 @@
+{
+  "bot_name": {
+    "description": "@机器人 替换为的名字",
+    "hint": "提交给LLM时，@机器人的部分会替换成这个名字，默认宁宁。",
+    "type": "string",
+    "default": "宁宁"
+  },
+  "keep_at_marker": {
+    "description": "保留 [At:qq] 标记",
+    "hint": "开启后不替换为名字，保留原始 At 标记。",
+    "type": "bool",
+    "default": false
+  }
+}
