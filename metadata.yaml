@@ -1,0 +1,10 @@
+name: astrbot_plugin_full_prompt
+display_name: Full Prompt (唤醒词保留)
+desc: 修复唤醒词/At被剥离导致提交给LLM的提示词残缺的问题
+help: 自动把唤醒词补回提交给LLM的提示词，无需配置。
+version: 1.0.0
+author: nene
+logo:
+support_platforms:
+  - aiocqhttp
+astrbot_version: ">=v4.12.0"
