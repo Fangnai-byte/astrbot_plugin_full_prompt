@@ -1,5 +1,7 @@
 # astrbot_plugin_full_prompt
 
+![logo](logo.png)
+
 修复 AstrBot 中**唤醒词 / @机器人 被剥离**导致提交给 LLM 的提示词残缺的问题。
 
 ## 问题现象
