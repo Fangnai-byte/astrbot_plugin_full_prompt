@@ -12,9 +12,34 @@ class FullPromptPlugin(Star):
         super().__init__(context)
         self.config = config or {}
 
+    # ---------------- 昵称解析 ----------------
+    def _parse_bot_name_map(self) -> dict:
+        """解析按群昵称映射。支持 dict 或 '群号:昵称,群号:昵称' 字符串。"""
+        raw = self.config.get("bot_name_map", "") or ""
+        if isinstance(raw, dict):
+            return {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()}
+        out = {}
+        for item in str(raw).split(","):
+            item = item.strip()
+            if not item or ":" not in item:
+                continue
+            gid, name = item.split(":", 1)
+            if name.strip():
+                out[gid.strip()] = name.strip()
+        return out
+
+    def _get_bot_name(self, event: AstrMessageEvent) -> str:
+        """按群返回机器人昵称，未配置的群用全局默认。"""
+        default = str(self.config.get("bot_name", "") or "").strip() or "宁宁"
+        gid = str(event.get_group_id() or "")
+        if gid:
+            return self._parse_bot_name_map().get(gid, default)
+        return default
+
+    # ---------------- 消息重建 ----------------
     def _rebuild_text(self, event: AstrMessageEvent) -> str:
         """从原始消息链重建完整用户文本，把 @机器人 换成昵称。"""
-        bot_name = str(self.config.get("bot_name", "") or "").strip() or "宁宁"
+        bot_name = self._get_bot_name(event)
         keep_marker = bool(self.config.get("keep_at_marker", False))
         self_id = str(event.get_self_id() or "")
         parts = []
@@ -45,11 +70,23 @@ class FullPromptPlugin(Star):
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", "", text or "")
 
+    # ---------------- 钩子 ----------------
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
         """在请求发出前，把被剥离的唤醒词/At补回 prompt。"""
         try:
             if not req.prompt:
+                return
+            # 排除群：配置了则不补全
+            gid = str(event.get_group_id() or "")
+            if gid:
+                exclude = [str(x) for x in (self.config.get("exclude_groups", []) or [])]
+                if gid in exclude:
+                    return
+            # 私聊开关
+            if event.is_private_chat() and not bool(
+                self.config.get("enable_private", True)
+            ):
                 return
             user_text = self._rebuild_text(event)
             if not user_text:

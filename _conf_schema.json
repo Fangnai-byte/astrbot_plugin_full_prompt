@@ -5,10 +5,28 @@
     "type": "string",
     "default": "宁宁"
   },
+  "bot_name_map": {
+    "description": "按群自定义昵称",
+    "hint": "格式：群号:昵称,群号:昵称，如 748791823:老大,1092801060:宁宁。未配置的群用 bot_name。",
+    "type": "string",
+    "default": ""
+  },
   "keep_at_marker": {
     "description": "保留 [At:qq] 标记",
     "hint": "开启后不替换为名字，保留原始 At 标记。",
     "type": "bool",
     "default": false
+  },
+  "exclude_groups": {
+    "description": "不补全提示词的群号",
+    "hint": "这些群的消息不进行提示词补全，逗号或列表形式。",
+    "type": "list",
+    "default": []
+  },
+  "enable_private": {
+    "description": "私聊是否补全",
+    "hint": "关闭后私聊消息不补全提示词。",
+    "type": "bool",
+    "default": true
   }
 }
