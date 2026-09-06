@@ -14,7 +14,18 @@ class FullPromptPlugin(Star):
 
     # ---------------- 昵称解析 ----------------
     def _parse_kv_map(self, raw) -> dict:
-        """解析 'k:v,k:v' 或 dict 形式的映射，统一转为 {str: str}。"""
+        """统一转为 {str: str}，兼容三种形态：
+        list 每项 "号,昵称"（当前面板形态，逐条添加）；dict {号: 昵称}；旧字符串 "号:昵称,号:昵称"。"""
+        if isinstance(raw, list):
+            out = {}
+            for item in raw:
+                item = str(item).strip().replace("，", ",")
+                if not item or "," not in item:
+                    continue
+                key, name = item.split(",", 1)
+                if name.strip():
+                    out[key.strip()] = name.strip()
+            return out
         if isinstance(raw, dict):
             return {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()}
         out = {}
@@ -28,11 +39,11 @@ class FullPromptPlugin(Star):
         return out
 
     def _parse_bot_name_map(self) -> dict:
-        """解析按群昵称映射。支持 dict 或 '群号:昵称,群号:昵称' 字符串。"""
+        """解析按群昵称映射。支持 list('群号,昵称') / dict / 旧字符串。"""
         return self._parse_kv_map(self.config.get("bot_name_map", "") or "")
 
     def _parse_bot_self_map(self) -> dict:
-        """解析按Bot(self_id)昵称映射。支持 dict 或 'self_id:昵称,self_id:昵称' 字符串。"""
+        """解析按Bot(self_id)昵称映射。支持 list('QQ号,昵称') / dict / 旧字符串。"""
         return self._parse_kv_map(self.config.get("bot_name_by_self_id", "") or "")
 
     def _get_bot_name(self, event: AstrMessageEvent) -> str:
