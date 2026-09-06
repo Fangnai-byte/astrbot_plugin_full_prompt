@@ -55,6 +55,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `bot_name` | string | `宁宁` | 提交给 LLM 时，`@机器人` 替换为的名字 |
 | `bot_name_map` | string | 空 | 按群自定义昵称，格式 `群号:昵称,群号:昵称` |
+| `bot_name_by_self_id` | string | 空 | 按Bot账号自定义昵称，格式 `bot的QQ号:昵称,bot的QQ号:昵称` |
 | `keep_at_marker` | bool | `false` | 开启后不替换为名字，保留原始 `[At:qq]` 标记 |
 | `exclude_groups` | list | 空 | 不补全提示词的群号列表 |
 | `enable_private` | bool | `true` | 私聊是否补全提示词 |
@@ -66,6 +67,17 @@ bot_name_map = "748791823:老大,1092801060:宁宁"
 ```
 
 在群 748791823 中 @机器人 会替换为"老大"，在群 1092801060 中替换为"宁宁"，其他群用 `bot_name`。
+
+### 按Bot账号昵称示例（多账号挂载）
+
+```
+bot_name_by_self_id = "10001:宁宁,10002:小助手"
+```
+
+同一个 AstrBot 挂多个机器人账号时，`10001` 这个 bot 收到的消息把 @机器人 替换为"宁宁"，
+`10002` 收到的替换为"小助手"。私聊场景没有群号，也能靠这个配置区分。
+
+> 优先级：按群 `bot_name_map` > 按Bot `bot_name_by_self_id` > 全局 `bot_name` > 默认 `宁宁`。
 
 ## 兼容性
 

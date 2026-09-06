@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0] - 2026-09-07
+
+### Added
+
+- 新增 `bot_name_by_self_id` 配置，可按 Bot 账号(self_id)设置不同昵称（如 `10001:宁宁,10002:小助手`）。
+  多账号挂载时，私聊也能正确区分唤醒词。
+- 昵称解析优先级：按群 `bot_name_map` > 按Bot `bot_name_by_self_id` > 全局 `bot_name` > 默认 `宁宁`。
+
+### Changed
+
+- 抽取通用 `_parse_kv_map`，统一按群/按Bot 两种映射的解析逻辑。
+
 ## [1.1.0] - 2026-08-30
 
 ### Added

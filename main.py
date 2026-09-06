@@ -13,9 +13,8 @@ class FullPromptPlugin(Star):
         self.config = config or {}
 
     # ---------------- 昵称解析 ----------------
-    def _parse_bot_name_map(self) -> dict:
-        """解析按群昵称映射。支持 dict 或 '群号:昵称,群号:昵称' 字符串。"""
-        raw = self.config.get("bot_name_map", "") or ""
+    def _parse_kv_map(self, raw) -> dict:
+        """解析 'k:v,k:v' 或 dict 形式的映射，统一转为 {str: str}。"""
         if isinstance(raw, dict):
             return {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()}
         out = {}
@@ -23,17 +22,33 @@ class FullPromptPlugin(Star):
             item = item.strip()
             if not item or ":" not in item:
                 continue
-            gid, name = item.split(":", 1)
+            key, name = item.split(":", 1)
             if name.strip():
-                out[gid.strip()] = name.strip()
+                out[key.strip()] = name.strip()
         return out
 
+    def _parse_bot_name_map(self) -> dict:
+        """解析按群昵称映射。支持 dict 或 '群号:昵称,群号:昵称' 字符串。"""
+        return self._parse_kv_map(self.config.get("bot_name_map", "") or "")
+
+    def _parse_bot_self_map(self) -> dict:
+        """解析按Bot(self_id)昵称映射。支持 dict 或 'self_id:昵称,self_id:昵称' 字符串。"""
+        return self._parse_kv_map(self.config.get("bot_name_by_self_id", "") or "")
+
     def _get_bot_name(self, event: AstrMessageEvent) -> str:
-        """按群返回机器人昵称，未配置的群用全局默认。"""
+        """返回本次消息使用的机器人昵称（唤醒词）。
+        优先级：按群 bot_name_map > 按Bot bot_name_by_self_id > 全局 bot_name > 默认宁宁。"""
         default = str(self.config.get("bot_name", "") or "").strip() or "宁宁"
         gid = str(event.get_group_id() or "")
         if gid:
-            return self._parse_bot_name_map().get(gid, default)
+            name = self._parse_bot_name_map().get(gid)
+            if name:
+                return name
+        self_id = str(event.get_self_id() or "")
+        if self_id:
+            name = self._parse_bot_self_map().get(self_id)
+            if name:
+                return name
         return default
 
     # ---------------- 消息重建 ----------------

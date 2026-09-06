@@ -11,6 +11,12 @@
     "type": "string",
     "default": ""
   },
+  "bot_name_by_self_id": {
+    "description": "按Bot(self_id)自定义昵称（唤醒词）",
+    "hint": "格式：bot的QQ号:昵称,bot的QQ号:昵称，如 123456:宁宁,654321:小助手。多账号挂载时按消息来源的bot账号匹配，优先级低于按群bot_name_map。",
+    "type": "string",
+    "default": ""
+  },
   "keep_at_marker": {
     "description": "保留 [At:qq] 标记",
     "hint": "开启后不替换为名字，保留原始 At 标记。",
