@@ -1,21 +1,21 @@
 {
   "bot_name": {
-    "description": "@机器人 替换为的名字",
-    "hint": "提交给LLM时，@机器人的部分会替换成这个名字，默认宁宁。",
+    "description": "默认昵称/唤醒词（兜底）",
+    "hint": "当该群、该Bot都没有单独配置时使用的默认唤醒词，@机器人的部分会替换成这个名字。留空则用「宁宁」。",
     "type": "string",
     "default": "宁宁"
   },
   "bot_name_map": {
     "description": "按群自定义昵称",
-    "hint": "格式：群号:昵称,群号:昵称，如 748791823:老大,1092801060:宁宁。未配置的群用 bot_name。",
-    "type": "string",
-    "default": ""
+    "hint": "点击「添加」，键填群号、值填该群要使用的昵称（如 键 748791823 → 值 老大）。也兼容旧格式字符串「群号:昵称,群号:昵称」。未配置的群按 Bot 或默认规则匹配。",
+    "type": "dict",
+    "default": {}
   },
   "bot_name_by_self_id": {
     "description": "按Bot(self_id)自定义昵称（唤醒词）",
-    "hint": "格式：bot的QQ号:昵称,bot的QQ号:昵称，如 123456:宁宁,654321:小助手。多账号挂载时按消息来源的bot账号匹配，优先级低于按群bot_name_map。",
-    "type": "string",
-    "default": ""
+    "hint": "点击「添加」，键填 Bot 的QQ号、值填该 Bot 要补全的唤醒词（如 键 123456 → 值 宁宁）。多账号挂载时按消息来源的Bot账号匹配，优先级低于按群 bot_name_map。也兼容旧格式字符串。",
+    "type": "dict",
+    "default": {}
   },
   "keep_at_marker": {
     "description": "保留 [At:qq] 标记",
