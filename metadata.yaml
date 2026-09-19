@@ -4,8 +4,8 @@ desc: 修复唤醒词/At被剥离导致提交给LLM的提示词残缺的问题
 help: 自动把唤醒词补回提交给LLM的提示词，无需配置。
 version: 1.2.3
 author: 綾地 寧々&Fangnai-byte
-repo: "https://github.com/Fangnai-byte/astrbot_plugin_full_prompt"
-logo: "https://raw.githubusercontent.com/Fangnai-byte/astrbot_plugin_full_prompt/main/logo.png"
+repo: "https://github.com/NekoHome-Studio/astrbot_plugin_full_prompt"
+logo: "https://raw.githubusercontent.com/NekoHome-Studio/astrbot_plugin_full_prompt/main/logo.png"
 support_platforms:
   - aiocqhttp
 astrbot_version: ">=v4.12.0"
