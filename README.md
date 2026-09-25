@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3Dv4.12.0-2ea44f)](https://github.com/Soulter/AstrBot)
-![GitHub stars](https://img.shields.io/github/stars/NekoHome-Studio/astrbot_plugin_full_prompt)
+![GitHub stars](https://img.shields.io/github/stars/Fangnai-byte/astrbot_plugin_full_prompt)
 
 修复 AstrBot 中**唤醒词 / @机器人 被剥离**导致提交给 LLM 的提示词残缺的问题。
 
