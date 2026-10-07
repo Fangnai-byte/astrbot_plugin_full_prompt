@@ -1,4 +1,5 @@
 import re
+from sys import maxsize
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
@@ -212,7 +213,9 @@ class FullPromptPlugin(Star):
         return re.sub(r"\s+", "", text or "")
 
     # ---------------- 钩子 ----------------
-    @filter.on_llm_request()
+    # 优先级最高：本插件的活儿是「把被剥掉的唤醒词 / @ 补回来」，得让其它插件的
+    # llm_request 钩子（记忆召回、短语气词判断等）看到的是补全后的原文。
+    @filter.on_llm_request(priority=maxsize)
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
         """在请求发出前，把被剥离的唤醒词/At补回 prompt。"""
         try:
