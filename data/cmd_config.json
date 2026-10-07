@@ -1,6 +1,6 @@
 {
-  "_redacted": "2026-10-07 已去敏清空。本文件原为一份 AstrBot 主配置副本（cmd_config.json），内含旧仪表盘口令哈希（md5 + pbkdf2）。",
-  "_why": "这是插件仓库工作副本（tmp/rewrite 暂存目录），清空以免私密内容随 commit 推到远端。",
+  "_redacted": "2026-10-07 已去敏清空。本文件原为一份 AstrBot 主配置副本（cmd_config.json），内含旧仪表盘口令哈希（md5 + pbkdf2）与各平台空配置。",
+  "_why": "插件代码不读取本文件；此目录是仓库工作副本，清空以免私密内容随 commit 推到远端。",
   "_backup": "无独立留底：其中的口令哈希是被现行配置取代的旧值（与 AstrBot data/cmd_config.json 的哈希不同），且主配置本体仍在 data/cmd_config.json。",
   "_do_not_restore": "若从上游仓库重新拉取本插件，本文件本就不该存在；请勿再从 data/ 拷贝配置进来。"
 }

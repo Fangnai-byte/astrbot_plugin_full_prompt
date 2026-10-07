@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .git/
+
+# 运行时副本/备份不要进仓库；data/t2i_templates/ 是插件自带素材，要保留
+data/cmd_config.json
+*.bak*
