@@ -174,12 +174,17 @@ class FullPromptPlugin(Star):
         return str(self.config.get("bot_name", "") or "").strip() or DEFAULT_BOT_NAME
 
     # ---------------- 消息重建 ----------------
-    def _rebuild_text(
+    def _rebuild_views(
         self,
         event: AstrMessageEvent,
         wake_words: list | None = None,
-    ) -> str:
-        """从原始消息链重建完整用户文本，并把 @机器人 换回它的名字。"""
+    ) -> tuple[str, str]:
+        """重建两个视图：
+
+        - full：给 LLM 看的完整文本——别人的 @ 写成 `@昵称(qq)`，自己的 @ 换成机器人名字
+        - skeleton：只由**纯文本**拼成的骨架，不含任何 At 渲染，用来跟框架的 prompt 比对
+          （框架会把 @自己 整段删掉、别人的 @ 写成 `@昵称(qq)`；比骨架才不受这些表示差异影响）
+        """
         if wake_words is None:
             wake_words = self._get_wake_words(event)
         fallback_name = self._get_bot_name(event, wake_words)
@@ -187,10 +192,13 @@ class FullPromptPlugin(Star):
         already_named = bool(self._typed_wake_word(event, wake_words))
         keep_marker = bool(self.config.get("keep_at_marker", False))
         self_id = str(event.get_self_id() or "")
-        parts = []
+        parts: list[str] = []
+        plain: list[str] = []
         for c in getattr(event.message_obj, "message", []) or []:
             if isinstance(c, Plain):
-                parts.append(str(getattr(c, "text", "")))
+                text = str(getattr(c, "text", ""))
+                parts.append(text)
+                plain.append(text)
             elif isinstance(c, AtAll):
                 # AtAll 是 At 的子类，必须排在前面判断，否则永远走不到这个分支
                 parts.append("[全体成员]")
@@ -217,7 +225,15 @@ class FullPromptPlugin(Star):
                 parts.append("[语音]")
             else:
                 parts.append(f"[{getattr(c, 'type', '未知组件')}]")
-        return "".join(parts).strip()
+        return "".join(parts).strip(), "".join(plain).strip()
+
+    def _rebuild_text(
+        self,
+        event: AstrMessageEvent,
+        wake_words: list | None = None,
+    ) -> str:
+        """兼容旧调用：只取「给 LLM 看」的那一版。"""
+        return self._rebuild_views(event, wake_words)[0]
 
     @staticmethod
     def _normalize(text: str) -> str:
@@ -249,7 +265,7 @@ class FullPromptPlugin(Star):
             ):
                 return
             wake_words = self._get_wake_words(event)
-            user_text = self._rebuild_text(event, wake_words)
+            user_text, skeleton = self._rebuild_views(event, wake_words)
             if not user_text:
                 return
             a = self._normalize(user_text)
@@ -258,11 +274,13 @@ class FullPromptPlugin(Star):
                 return
             matched = a.endswith(b) or b in a
             if not matched:
-                # 框架把第一个 @自己 整段删了、别人的 @ 写成「@昵称(qq)」，
-                # 与我们重建的文本表示不同——剥掉 At 记号再比一次
-                a_cmp = self._strip_at_tokens(a)
-                b_cmp = self._strip_at_tokens(b)
-                matched = bool(b_cmp) and (a_cmp.endswith(b_cmp) or b_cmp in a_cmp)
+                # 框架会把 @自己 整段删掉、别人的 @ 写成「@昵称(qq)」，跟我们重建的文本表示不同；
+                # 插入的机器人名字还会把文本切成几段 ⇒ 用「纯文本骨架」比：两边都只剩用户打的字
+                sk = self._normalize(skeleton)
+                pb = self._strip_at_tokens(b)
+                matched = bool(sk) and bool(pb) and (
+                    sk == pb or sk.endswith(pb) or pb in sk
+                )
             if matched:
                 req.prompt = user_text
                 logger.debug(
@@ -273,7 +291,7 @@ class FullPromptPlugin(Star):
                 # 提示词不是重建文本的一部分（多轮/工具调用改写过），保持不动，只留痕便于排查
                 logger.debug(
                     f"[full_prompt] 跳过补全：prompt={req.prompt!r} 不是重建文本 "
-                    f"{user_text!r} 的结尾/片段",
+                    f"{user_text!r} 的结尾/片段（骨架={skeleton!r}）",
                 )
         except BaseException as e:
             logger.debug(f"[full_prompt] 处理失败: {e}")
