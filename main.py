@@ -9,6 +9,11 @@ from astrbot.core.message.components import At, AtAll, Plain, Reply, Image, Face
 
 DEFAULT_BOT_NAME = "宁宁"
 
+# At 记号的两种写法：我们重建的 `[At:qq]`，以及框架 message_str 里的 `@昵称(qq)`。
+# 比对 prompt 与重建文本前统一剥掉，否则多重 @ 的消息永远对不上（2026-10-20 实测：
+# 「成员A @机器人 分组名单；…」框架把 @自己 那段删了，重建版用 [At:qq]，护栏判不中）。
+_AT_TOKEN_RE = re.compile(r"\[At:[^\]]*\]|@[^\s@()（）]+(?:\([^)]*\))?")
+
 
 class FullPromptPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -191,11 +196,17 @@ class FullPromptPlugin(Star):
                 parts.append("[全体成员]")
             elif isinstance(c, At):
                 qq = str(getattr(c, "qq", ""))
-                if keep_marker or qq != self_id:
+                if keep_marker:
                     parts.append(f"[At:{qq}]")
-                elif not already_named:
+                elif qq == self_id:
                     # 平台给了名字就用平台的（适配当前这个群的叫法），没给才退回配置里的唤醒词
-                    parts.append(self._platform_at_name(c) or fallback_name)
+                    if not already_named:
+                        parts.append(self._platform_at_name(c) or fallback_name)
+                else:
+                    # 别人的 @：和框架 message_str 一样写成「@昵称(qq)」，模型才看得懂这是谁；
+                    # 拿不到昵称时退回 [At:qq]
+                    at_name = self._platform_at_name(c)
+                    parts.append(f"@{at_name}({qq})" if at_name else f"[At:{qq}]")
             elif isinstance(c, Reply):
                 parts.append("")
             elif isinstance(c, Image):
@@ -211,6 +222,11 @@ class FullPromptPlugin(Star):
     @staticmethod
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", "", text or "")
+
+    @staticmethod
+    def _strip_at_tokens(text: str) -> str:
+        """剥掉 At 记号，便于跨表示比对（`[At:qq]` 与框架的 `@昵称(qq)`）。"""
+        return _AT_TOKEN_RE.sub("", text or "")
 
     # ---------------- 钩子 ----------------
     # 优先级最高：本插件的活儿是「把被剥掉的唤醒词 / @ 补回来」，得让其它插件的
@@ -240,7 +256,14 @@ class FullPromptPlugin(Star):
             b = self._normalize(req.prompt)
             if not a or a == b:
                 return
-            if a.endswith(b) or b in a:
+            matched = a.endswith(b) or b in a
+            if not matched:
+                # 框架把第一个 @自己 整段删了、别人的 @ 写成「@昵称(qq)」，
+                # 与我们重建的文本表示不同——剥掉 At 记号再比一次
+                a_cmp = self._strip_at_tokens(a)
+                b_cmp = self._strip_at_tokens(b)
+                matched = bool(b_cmp) and (a_cmp.endswith(b_cmp) or b_cmp in a_cmp)
+            if matched:
                 req.prompt = user_text
                 logger.debug(
                     f"[full_prompt] 已补全提示词: {req.prompt!r} "
