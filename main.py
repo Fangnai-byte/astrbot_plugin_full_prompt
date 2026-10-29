@@ -482,6 +482,19 @@ class FullPromptPlugin(Star):
         return self._rebuild_views(event, wake_words)[0]
 
     @staticmethod
+    def _leading_is_at(event: AstrMessageEvent) -> bool:
+        """消息的**第一个有内容的组件**是不是 @（At / At全体）。
+
+        前面可能有空白的纯文本段（有些人习惯先打空格再 @），跳过它们再判断。
+        给 `skip_at_leading` 用：开着且句首是 @ 时不补全。
+        """
+        for c in getattr(event.message_obj, "message", []) or []:
+            if isinstance(c, Plain) and not str(getattr(c, "text", "") or "").strip():
+                continue
+            return isinstance(c, (At, AtAll))
+        return False
+
+    @staticmethod
     def _normalize(text: str) -> str:
         return re.sub(r"\s+", "", text or "")
 
@@ -509,6 +522,12 @@ class FullPromptPlugin(Star):
             if event.is_private_chat() and not bool(
                 self.config.get("enable_private", True)
             ):
+                return
+            # 句首 @ 就跳过补全（默认关；给「不想要补全写进来」的人留的开关）
+            if bool(self.config.get("skip_at_leading", False)) and self._leading_is_at(
+                event
+            ):
+                logger.debug("[full_prompt] 句首是 @，按 skip_at_leading 跳过补全")
                 return
             wake_words = self._get_wake_words(event)
             user_text, skeleton = self._rebuild_views(event, wake_words)
