@@ -1,7 +1,9 @@
 import re
+import time
 from sys import maxsize
 
 from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event.filter import CustomFilter
 from astrbot.api.star import Context, Star
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.provider import ProviderRequest
@@ -14,11 +16,250 @@ DEFAULT_BOT_NAME = "宁宁"
 # 「成员A @机器人 分组名单；…」框架把 @自己 那段删了，重建版用 [At:qq]，护栏判不中）。
 _AT_TOKEN_RE = re.compile(r"\[At:[^\]]*\]|@[^\s@()（）]+(?:\([^)]*\))?")
 
+# ---------------- 名字出现在句子里就算叫她 ----------------
+# AstrBot 的唤醒前缀只认**开头**（`/宁宁 在吗`），中间的看不见。
+# 这里用自定义 filter：它在唤醒检查阶段被调用，命中就把这条消息标成「被唤醒」，
+# 效果跟 @ 一下一样 —— 于是「今天好累，我要宁宁陪我」这种也会叫她。
+#
+# 判定两件事（任一命中即唤醒）：
+#   1) 消息里出现**这个 bot 的名字**（wake_on_name，默认开）——
+#      名字来源：AstrBot 该会话的唤醒词 / 群映射 / 按 bot 映射 / bot_name / 平台实例名，
+#      只取「像名字」的（`/`、`~` 这类纯符号前缀不算），纯符号和单字会被跳过。
+#   2) 命中 `wake_patterns`（可选，想更精细时才用；支持 {name} 占位符、支持按 bot 分）
+#
+# 为什么不用 `filter.regex`：那里的正则在 import 时就写死，改配置得重启。
+_WAKE_ON_NAME = True             # 名字出现在任意位置即唤醒
+_WAKE_RULES: list = []           # 全局正则
+_WAKE_BOT_RULES: dict = {}       # bot_id -> [正则]
+_WAKE_EXCLUDE_GROUPS: set = set()
+_NAMES_RESOLVER = None           # 由插件实例注入：event -> [该 bot 的名字...]
+_PATTERN_CACHE: dict = {}        # (规则原文, 昵称) -> 编译后的 Pattern | None
+_NAME_CACHE: dict = {}           # (self_id, group_id) -> ([名字...], 时间)
+
+
+def set_wake_rules(
+    *,
+    wake_on_name: bool = True,
+    patterns=None,
+    bot_map=None,
+    exclude_groups=None,
+    names_resolver=None,
+) -> None:
+    """装载唤醒规则。坏正则只跳过并记日志，不影响其它规则和插件本身。"""
+    global _WAKE_ON_NAME, _WAKE_RULES, _WAKE_BOT_RULES, _WAKE_EXCLUDE_GROUPS, _NAMES_RESOLVER
+    _WAKE_ON_NAME = bool(wake_on_name)
+    _WAKE_RULES = [str(x).strip() for x in (patterns or []) if str(x or "").strip()]
+    _WAKE_BOT_RULES = {}
+    for item in bot_map or []:
+        text = str(item or "").strip().replace("，", ",")
+        if not text:
+            continue
+        if "," not in text:
+            logger.warning(f"[full_prompt] wake_patterns_map 这行少了逗号，已跳过: {text!r}")
+            continue
+        bot_id, rule = text.split(",", 1)
+        bot_id, rule = bot_id.strip(), rule.strip()
+        if not bot_id or not rule:
+            continue
+        _WAKE_BOT_RULES.setdefault(bot_id, []).append(rule)
+    _PATTERN_CACHE.clear()
+    _NAME_CACHE.clear()
+    groups = exclude_groups if isinstance(exclude_groups, (list, tuple)) else []
+    _WAKE_EXCLUDE_GROUPS = {str(g).strip() for g in groups if str(g).strip()}
+    if names_resolver is not None:
+        _NAMES_RESOLVER = names_resolver
+    total = len(_WAKE_RULES) + sum(len(v) for v in _WAKE_BOT_RULES.values())
+    logger.info(
+        f"[full_prompt] 唤醒方式："
+        f"{'名字出现在任意位置' if _WAKE_ON_NAME else '仅靠 AstrBot 前缀/@'}"
+        f"{'；额外正则 ' + str(total) + ' 条' if total else ''}"
+        f"{'；排除群 ' + str(sorted(_WAKE_EXCLUDE_GROUPS)) if _WAKE_EXCLUDE_GROUPS else ''}",
+    )
+    if _WAKE_RULES:
+        logger.info(f"[full_prompt]  全局正则：{_WAKE_RULES}")
+    for bot_id, rules in _WAKE_BOT_RULES.items():
+        logger.info(f"[full_prompt]  bot {bot_id} 专用正则：{rules}")
+
+
+def _compile_wake(rule: str, name: str):
+    """把 {name} 换成该 bot 的昵称后编译；规则不合法返回 None（只记一次日志）。"""
+    key = (rule, name)
+    if key in _PATTERN_CACHE:
+        return _PATTERN_CACHE[key]
+    text = rule
+    if "{name}" in text:
+        if not name:
+            _PATTERN_CACHE[key] = None
+            return None
+        text = text.replace("{name}", re.escape(name))
+    try:
+        pat = re.compile(text)
+    except re.error as e:
+        logger.warning(f"[full_prompt] 唤醒正则无效，已跳过 {rule!r}: {e}")
+        pat = None
+    _PATTERN_CACHE[key] = pat
+    return pat
+
+
+def _bot_names(event: AstrMessageEvent) -> list:
+    """这个 bot 的名字列表（带 5 秒缓存，避免每条消息都去翻配置）。"""
+    if _NAMES_RESOLVER is None:
+        return []
+    try:
+        key = (str(event.get_self_id() or ""), str(event.get_group_id() or ""))
+    except BaseException:  # noqa: BLE001
+        key = None
+    if key is not None:
+        hit = _NAME_CACHE.get(key)
+        if hit and time.time() - hit[1] < 5:
+            return hit[0]
+    try:
+        names = [str(x).strip() for x in (_NAMES_RESOLVER(event) or []) if str(x or "").strip()]
+    except BaseException:  # noqa: BLE001
+        names = []
+    out = []
+    for n in names:
+        if n not in out:
+            out.append(n)
+    if key is not None:
+        _NAME_CACHE[key] = (out, time.time())
+    return out
+
+
+class WakePatternFilter(CustomFilter):
+    """名字出现在句子里 / 命中自定义正则 → 视为被唤醒。
+
+    在唤醒检查阶段就被调用（早于 ProcessStage），所以这里置位
+    `is_at_or_wake_command` 之后，LLM 那一步才会真的跑起来。
+    """
+
+    def __init__(self, raise_error: bool = True, **kwargs):
+        super().__init__(raise_error=raise_error)
+
+    def _mark(self, event, how: str) -> bool:
+        event.is_wake = True
+        event.is_at_or_wake_command = True
+        try:
+            event.set_extra("full_prompt_wake_by", how)
+        except BaseException:  # noqa: BLE001
+            pass
+        # INFO 级：平时不响，真被叫到时留一行，方便排查「为什么没反应」
+        logger.info(
+            f"[full_prompt] 唤醒命中 {how!r}"
+            f"（bot={event.get_self_id()} gid={event.get_group_id()}）",
+        )
+        return True
+
+    def filter(self, event: AstrMessageEvent, cfg: AstrBotConfig) -> bool:
+        if not _WAKE_ON_NAME and not _WAKE_RULES and not _WAKE_BOT_RULES:
+            return False
+        gid = str(event.get_group_id() or "").strip()
+        if gid and gid in _WAKE_EXCLUDE_GROUPS:
+            return False
+        text = str(event.get_message_str() or "").strip()
+        if not text:
+            return False
+        try:
+            self_id = str(event.get_self_id() or "").strip()
+        except BaseException:  # noqa: BLE001
+            self_id = ""
+
+        # ① 名字出现在任意位置
+        if _WAKE_ON_NAME:
+            for name in _bot_names(event):
+                if len(name) < 2:  # 单字名字误伤太大，跳过
+                    continue
+                if name in text:
+                    return self._mark(event, name)
+
+        # ② 额外正则（分 bot 优先）
+        rules = _WAKE_BOT_RULES.get(self_id) or _WAKE_RULES
+        if not rules:
+            return False
+        name_for_pat = (_bot_names(event) or [""])[0]
+        for rule in rules:
+            pat = _compile_wake(rule, name_for_pat)
+            if pat is None:
+                continue
+            m = pat.search(text)
+            if m:
+                return self._mark(event, m.group(0))
+        return False
+
 
 class FullPromptPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
+        set_wake_rules(
+            wake_on_name=bool(self.config.get("wake_on_name", True)),
+            patterns=self.config.get("wake_patterns", []) or [],
+            bot_map=self.config.get("wake_patterns_map", []) or [],
+            exclude_groups=self.config.get("exclude_groups", []) or [],
+            names_resolver=self._wake_names_for,
+        )
+
+    def _wake_names_for(self, event: AstrMessageEvent) -> list:
+        """这个 bot 可以被叫到的名字（全都算，出现任意一个就唤醒）。
+
+        来源：AstrBot 该会话的唤醒词 + extra_wake_words + 群映射 + 按 bot 映射 +
+        平台实例名（UMO 前缀）+ bot_name。只保留「像名字」的——
+        `/`、`~` 这类纯符号前缀不算名字，否则满屏消息都会被当成叫它。
+        """
+        names = []
+        try:
+            for w in self._get_wake_words(event):
+                text = str(w or "").strip()
+                if text and self._is_name_like(text):
+                    names.append(text)
+        except BaseException:  # noqa: BLE001
+            pass
+        for fn in (self._parse_bot_name_map, self._parse_bot_self_map):
+            try:
+                for v in fn().values():
+                    text = str(v or "").strip()
+                    if text and self._is_name_like(text):
+                        names.append(text)
+            except BaseException:  # noqa: BLE001
+                pass
+        try:
+            umo = str(getattr(event, "unified_msg_origin", "") or "")
+            head = umo.split(":", 1)[0].strip()
+            if head and self._is_name_like(head):
+                names.append(head)
+        except BaseException:  # noqa: BLE001
+            pass
+        try:
+            text = str(self.config.get("bot_name", "") or "").strip()
+            if text and self._is_name_like(text):
+                names.append(text)
+        except BaseException:  # noqa: BLE001
+            pass
+        out = []
+        for n in names:
+            if n not in out:
+                out.append(n)
+        return out
+
+    def _wake_name_for(self, event: AstrMessageEvent) -> str:
+        """给 {name} 占位符取名字（列表里的第一个）。"""
+        names = self._wake_names_for(event)
+        if names:
+            return names[0]
+        try:
+            return str(self._get_bot_name(event) or "").strip()
+        except BaseException:  # noqa: BLE001
+            return ""
+
+    # ---------------- 正则唤醒 ----------------
+    @filter.custom_filter(WakePatternFilter)
+    async def wake_by_pattern(self, event: AstrMessageEvent):
+        """只负责「这条算被唤醒」，不回复也不拦，后面照常交给 LLM。
+
+        真正干活的是 WakePatternFilter：它在唤醒检查阶段就把 event 标好了。
+        这里必须存在，因为 filter 只有挂在 handler 上才会被框架调用。
+        """
+        return
 
     # ---------------- 昵称/唤醒词解析 ----------------
     def _parse_kv_map(self, raw) -> dict:
