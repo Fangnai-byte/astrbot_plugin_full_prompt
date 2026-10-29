@@ -448,9 +448,14 @@ class FullPromptPlugin(Star):
                 if keep_marker:
                     parts.append(f"[At:{qq}]")
                 elif qq == self_id:
-                    # 平台给了名字就用平台的（适配当前这个群的叫法），没给才退回配置里的唤醒词
+                    # 平台给了名字就用平台的（适配当前这个群的叫法），没给才退回配置里的唤醒词。
+                    # ★ 写成 `@名字 `（带 @ 和空格），不要只写裸名字：
+                    #   裸名字会跟后面的正文粘成一句（「绫地宁宁这句话有几个字」），
+                    #   模型会把名字当成句子内容一起数，也会以为这句是别人说的。
+                    #   带上 @ 之后形状和框架写别人「@昵称(qq)」一致，是「在叫它」而不是「正文」。
                     if not already_named:
-                        parts.append(self._platform_at_name(c) or fallback_name)
+                        nm = self._platform_at_name(c) or fallback_name
+                        parts.append(f"@{nm} " if nm else "")
                 else:
                     # 别人的 @：和框架 message_str 一样写成「@昵称(qq)」，模型才看得懂这是谁；
                     # 拿不到昵称时退回 [At:qq]
