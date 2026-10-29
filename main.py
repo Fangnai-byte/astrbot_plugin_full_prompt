@@ -37,6 +37,7 @@ _PATTERN_CACHE: dict = {}        # (规则原文, 昵称) -> 编译后的 Patter
 _NAME_CACHE: dict = {}           # (self_id, group_id) -> ([名字...], 时间)
 _PEER_BOTS: set = set()          # 别的 bot 的号：它们发的消息不按名字唤醒
 _PEER_RESOLVER = None            # 由插件实例注入：() -> {号...}（含本机所有 bot + 配置里的）
+_SEEN_SELF_IDS: set = set()      # 运行中见过的本机 bot 号（兜底，见 _peer_bot_ids）
 
 
 def _is_peer_bot(sender_id: str) -> bool:
@@ -184,6 +185,8 @@ class WakePatternFilter(CustomFilter):
             self_id = str(event.get_self_id() or "").strip()
         except BaseException:  # noqa: BLE001
             self_id = ""
+        if self_id:
+            _SEEN_SELF_IDS.add(self_id)  # 兜底：见过的本机号都记下来
 
         # ★ 别的 bot 发的消息不参与「名字唤醒」。
         #   否则多 bot 同群会互相叫醒：A 的回复里提到 B 的名字 → B 醒 → B 又提到 C ……
@@ -225,7 +228,15 @@ class FullPromptPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
-        set_peer_bots(self._peer_bot_ids() if self.config.get("ignore_peer_bots", True) else [])
+        global _PEER_RESOLVER, _PEER_BOTS
+        if self.config.get("ignore_peer_bots", True):
+            # 装一个「随时重算」的解析器：插件加载时平台实例可能还没连上，
+            # 所以不能在 __init__ 里算一次就定死。
+            _PEER_RESOLVER = self._peer_bot_ids
+            _PEER_BOTS = self._peer_bot_ids()
+        else:
+            _PEER_RESOLVER = None
+            _PEER_BOTS = set()
         set_wake_rules(
             wake_on_name=bool(self.config.get("wake_on_name", True)),
             patterns=self.config.get("wake_patterns", []) or [],
@@ -287,18 +298,31 @@ class FullPromptPlugin(Star):
         return out
 
     def _peer_bot_ids(self) -> set:
-        """「别的 bot」的号：本机所有平台实例自己的号 + 配置里的 peer_bot_ids。
+        """「别的 bot」的号：本机所有 bot 账号 + 配置里的 peer_bot_ids。
 
-        本机的号要动态取（平台实例可能是插件加载之后才连上的），
-        所以每次算的时候顺便刷一遍；取不到就只返回配置里那些。
+        本机的号有三个来源（能拿到哪个用哪个）：
+        1. 平台实例自己的 `self_id`（有些实现有）；
+        2. aiocqhttp 的 `bot._wsr_api_clients` —— 反向 WS 连上来的每个号都在这里，
+           同机挂 3 个号时能把 3 个都列出来；
+        3. 运行中见过的 `event.get_self_id()`（兜底，总会慢慢齐）。
+        再并上配置里手填的 `peer_bot_ids`（别人家的 bot）。
         """
-        global _PEER_RESOLVER
         ids = set()
         try:
             for inst in self.context.platform_manager.get_insts():
                 sid = str(getattr(inst, "self_id", "") or "").strip()
                 if sid:
                     ids.add(sid)
+                clients = getattr(getattr(inst, "bot", None), "_wsr_api_clients", None)
+                if isinstance(clients, dict):
+                    for k in clients.keys():
+                        k = str(k or "").strip()
+                        if k:
+                            ids.add(k)
+        except BaseException:  # noqa: BLE001
+            pass
+        try:
+            ids |= _SEEN_SELF_IDS
         except BaseException:  # noqa: BLE001
             pass
         try:
@@ -308,7 +332,6 @@ class FullPromptPlugin(Star):
                     ids.add(sid)
         except BaseException:  # noqa: BLE001
             pass
-        _PEER_RESOLVER = self._peer_bot_ids
         return ids
 
     def _wake_name_for(self, event: AstrMessageEvent) -> str:
