@@ -35,28 +35,6 @@ _WAKE_EXCLUDE_GROUPS: set = set()
 _NAMES_RESOLVER = None           # 由插件实例注入：event -> [该 bot 的名字...]
 _PATTERN_CACHE: dict = {}        # (规则原文, 昵称) -> 编译后的 Pattern | None
 _NAME_CACHE: dict = {}           # (self_id, group_id) -> ([名字...], 时间)
-_PEER_BOTS: set = set()          # 别的 bot 的号：它们发的消息不按名字唤醒
-_PEER_RESOLVER = None            # 由插件实例注入：() -> {号...}（含本机所有 bot + 配置里的）
-_SEEN_SELF_IDS: set = set()      # 运行中见过的本机 bot 号（兜底，见 _peer_bot_ids）
-
-
-def _is_peer_bot(sender_id: str) -> bool:
-    """这个号是不是「别的 bot」。解析失败一律当不是，宁可变回原行为。"""
-    global _PEER_BOTS
-    if _PEER_RESOLVER is not None:
-        try:
-            extra = _PEER_RESOLVER() or set()
-        except BaseException:  # noqa: BLE001
-            extra = set()
-        if extra:
-            _PEER_BOTS = {str(x).strip() for x in extra if str(x or "").strip()}
-    return bool(sender_id) and sender_id in _PEER_BOTS
-
-
-def set_peer_bots(ids) -> None:
-    """手动指定「别的 bot」的号（本机的 bot 由插件实例自动收集）。"""
-    global _PEER_BOTS
-    _PEER_BOTS = {str(x).strip() for x in (ids or []) if str(x or "").strip()}
 
 
 def set_wake_rules(
@@ -185,21 +163,6 @@ class WakePatternFilter(CustomFilter):
             self_id = str(event.get_self_id() or "").strip()
         except BaseException:  # noqa: BLE001
             self_id = ""
-        if self_id:
-            _SEEN_SELF_IDS.add(self_id)  # 兜底：见过的本机号都记下来
-
-        # ★ 别的 bot 发的消息不参与「名字唤醒」。
-        #   否则多 bot 同群会互相叫醒：A 的回复里提到 B 的名字 → B 醒 → B 又提到 C ……
-        #   来回 ping-pong，一个群三个 bot 就变成全都出来说话。
-        #   注意：被 @ 仍然会唤醒（那是 AstrBot 自己的规则，不经过这里），
-        #   所以真要找某个 bot，@ 它就行。
-        try:
-            sender = str(event.get_sender_id() or "").strip()
-        except BaseException:  # noqa: BLE001
-            sender = ""
-        if sender and sender != self_id and _is_peer_bot(sender):
-            logger.debug(f"[full_prompt] 忽略别的 bot 的消息（sender={sender}），不按名字唤醒")
-            return False
 
         # ① 名字出现在任意位置
         if _WAKE_ON_NAME:
@@ -228,15 +191,6 @@ class FullPromptPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config or {}
-        global _PEER_RESOLVER, _PEER_BOTS
-        if self.config.get("ignore_peer_bots", True):
-            # 装一个「随时重算」的解析器：插件加载时平台实例可能还没连上，
-            # 所以不能在 __init__ 里算一次就定死。
-            _PEER_RESOLVER = self._peer_bot_ids
-            _PEER_BOTS = self._peer_bot_ids()
-        else:
-            _PEER_RESOLVER = None
-            _PEER_BOTS = set()
         set_wake_rules(
             wake_on_name=bool(self.config.get("wake_on_name", True)),
             patterns=self.config.get("wake_patterns", []) or [],
@@ -296,53 +250,6 @@ class FullPromptPlugin(Star):
             if n not in out:
                 out.append(n)
         return out
-
-    def _peer_bot_ids(self) -> set:
-        """「别的 bot」的号：本机所有 bot 账号 + 配置里的 peer_bot_ids。
-
-        本机的号有三个来源（能拿到哪个用哪个）：
-        1. 平台实例自己的 `self_id`（有些实现有）；
-        2. aiocqhttp 的 `bot._wsr_api_clients` —— 反向 WS 连上来的每个号都在这里，
-           同机挂 3 个号时能把 3 个都列出来；
-        3. 运行中见过的 `event.get_self_id()`（兜底，总会慢慢齐）。
-        再并上配置里手填的 `peer_bot_ids`（别人家的 bot）。
-        """
-        ids = set()
-        try:
-            for inst in self.context.platform_manager.get_insts():
-                sid = str(getattr(inst, "self_id", "") or "").strip()
-                if sid:
-                    ids.add(sid)
-                clients = getattr(getattr(inst, "bot", None), "_wsr_api_clients", None)
-                if isinstance(clients, dict):
-                    for k in clients.keys():
-                        k = str(k or "").strip()
-                        if k:
-                            ids.add(k)
-        except BaseException:  # noqa: BLE001
-            pass
-        try:
-            ids |= _SEEN_SELF_IDS
-        except BaseException:  # noqa: BLE001
-            pass
-        try:
-            for x in self.config.get("peer_bot_ids", []) or []:
-                sid = str(x or "").strip()
-                if sid:
-                    ids.add(sid)
-        except BaseException:  # noqa: BLE001
-            pass
-        return ids
-
-    def _wake_name_for(self, event: AstrMessageEvent) -> str:
-        """给 {name} 占位符取名字（列表里的第一个）。"""
-        names = self._wake_names_for(event)
-        if names:
-            return names[0]
-        try:
-            return str(self._get_bot_name(event) or "").strip()
-        except BaseException:  # noqa: BLE001
-            return ""
 
     # ---------------- 正则唤醒 ----------------
     @filter.custom_filter(WakePatternFilter)
