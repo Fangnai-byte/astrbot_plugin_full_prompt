@@ -214,14 +214,24 @@ class FullPromptPlugin(Star):
                     names.append(text)
         except BaseException:  # noqa: BLE001
             pass
-        for fn in (self._parse_bot_name_map, self._parse_bot_self_map):
-            try:
-                for v in fn().values():
-                    text = str(v or "").strip()
-                    if text and self._is_name_like(text):
-                        names.append(text)
-            except BaseException:  # noqa: BLE001
-                pass
+        # ★ 只取**属于这个 bot**的名字。
+        #   这里曾经把 bot_name_map / bot_name_by_self_id 的所有值都收进来，
+        #   结果别的 bot 的名字也进了自己的名字表 —— 群里一 @ 另一个 bot，
+        #   自己也被唤醒（多 bot 同群时「@ 一个全都出来」就是这么来的）。
+        #   按群映射（bot_name_map）也**不参与唤醒**：它一个群只有一条，
+        #   同群多个 bot 会读到同一个名字，同样是串号的来源；它只用于 @ 时的兜底称呼。
+        self_id = ""
+        try:
+            self_id = str(event.get_self_id() or "").strip()
+        except BaseException:  # noqa: BLE001
+            self_id = ""
+        try:
+            if self_id:
+                text = str(self._parse_bot_self_map().get(self_id) or "").strip()
+                if text and self._is_name_like(text):
+                    names.append(text)
+        except BaseException:  # noqa: BLE001
+            pass
         try:
             umo = str(getattr(event, "unified_msg_origin", "") or "")
             head = umo.split(":", 1)[0].strip()
