@@ -56,6 +56,20 @@ AstrBot 面板的「配置文件」里，每个 bot 有一串唤醒词，插件�
 
 AstrBot 只认**开头**的唤醒词和 @。她叫小助手时，`小助手在吗` 能叫醒，`今天好累，我要小助手陪我聊一会儿` 不能。
 
+## 只想让某一个词叫醒她
+
+三个开关叠起来用，缺一个都会留下口子：
+
+```json
+"wake_on_name": true,
+"wake_on_instance_name": false,
+"wake_on_bot_name": false
+```
+
+这样实例名和 `bot_name` 都不再参与唤醒，只有 `wake_prefix` 里写的词算数；而
+`wake_on_name` 保持开着，所以**词出现在句子中间照样唤醒**。想连句中都不认、必须放句首，
+再把 `wake_on_name` 关掉。
+
 打开 `wake_on_name`（默认开）之后，**任何一条消息里出现她的名字都算叫她**：
 
 | 消息 | 会叫醒吗 |
@@ -140,6 +154,10 @@ flowchart LR
 | `auto_wake_word` | bool | `true` | 自动读 AstrBot 里该会话配置的那串唤醒词（推荐开着） |
 | `bot_name` | string | `宁宁` | 最后兜底，平台没给 @ 名字、该会话也没配唤醒词时用 |
 | `extra_wake_words` | list | 空 | AstrBot 里没配、但插件也想认的唤醒词，一般留空 |
+| `wake_on_name` | bool | `true` | 名字出现在消息**任意位置**就算叫她；关掉后只认 AstrBot 的前缀/@ |
+| `wake_on_instance_name` | bool | `true` | 平台实例名（如 `绫地宁宁`）也当一个名字用 |
+| `wake_on_bot_name` | bool | `true` | `bot_name`（如 `宁宁`）也当一个名字用；关掉后它只用于称呼 |
+| `wake_name_min_len` | int | `2` | 名字短于这个长度不参与唤醒 |
 | `bot_name_map` | list | 空 | 可选兜底，按群指定 @机器人 的名字，填 `群号,昵称` |
 | `bot_name_by_self_id` | list | 空 | 可选兜底，按 Bot 账号指定名字，填 `QQ号,昵称` |
 | `keep_at_marker` | bool | `false` | 开着就不换名字，保留原始的 `[At:qq]` 标记 |

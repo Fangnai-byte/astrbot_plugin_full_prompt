@@ -32,6 +32,9 @@ _WAKE_ON_NAME = True             # 名字出现在任意位置即唤醒
 _WAKE_RULES: list = []           # 全局正则
 _WAKE_BOT_RULES: dict = {}       # bot_id -> [正则]
 _WAKE_EXCLUDE_GROUPS: set = set()
+_WAKE_ON_INSTANCE_NAME = True   # 平台实例名（UMO 前缀）也算名字
+_WAKE_ON_BOT_NAME = True        # 配置里的 bot_name 也算名字
+_NAME_MIN_LEN = 2               # 名字短于这个长度不参与唤醒（单字误伤太大）
 _NAMES_RESOLVER = None           # 由插件实例注入：event -> [该 bot 的名字...]
 _PATTERN_CACHE: dict = {}        # (规则原文, 昵称) -> 编译后的 Pattern | None
 _NAME_CACHE: dict = {}           # (self_id, group_id) -> ([名字...], 时间)
@@ -44,10 +47,20 @@ def set_wake_rules(
     bot_map=None,
     exclude_groups=None,
     names_resolver=None,
+    wake_on_instance_name: bool = True,
+    wake_on_bot_name: bool = True,
+    name_min_len: int = 2,
 ) -> None:
     """装载唤醒规则。坏正则只跳过并记日志，不影响其它规则和插件本身。"""
     global _WAKE_ON_NAME, _WAKE_RULES, _WAKE_BOT_RULES, _WAKE_EXCLUDE_GROUPS, _NAMES_RESOLVER
+    global _WAKE_ON_INSTANCE_NAME, _WAKE_ON_BOT_NAME, _NAME_MIN_LEN
     _WAKE_ON_NAME = bool(wake_on_name)
+    _WAKE_ON_INSTANCE_NAME = bool(wake_on_instance_name)
+    _WAKE_ON_BOT_NAME = bool(wake_on_bot_name)
+    try:
+        _NAME_MIN_LEN = max(1, int(name_min_len))
+    except (TypeError, ValueError):
+        _NAME_MIN_LEN = 2
     _WAKE_RULES = [str(x).strip() for x in (patterns or []) if str(x or "").strip()]
     _WAKE_BOT_RULES = {}
     for item in bot_map or []:
@@ -167,7 +180,7 @@ class WakePatternFilter(CustomFilter):
         # ① 名字出现在任意位置
         if _WAKE_ON_NAME:
             for name in _bot_names(event):
-                if len(name) < 2:  # 单字名字误伤太大，跳过
+                if len(name) < _NAME_MIN_LEN:  # 太短的名字误伤太大，跳过
                     continue
                 if name in text:
                     return self._mark(event, name)
@@ -197,6 +210,9 @@ class FullPromptPlugin(Star):
             bot_map=self.config.get("wake_patterns_map", []) or [],
             exclude_groups=self.config.get("exclude_groups", []) or [],
             names_resolver=self._wake_names_for,
+            wake_on_instance_name=bool(self.config.get("wake_on_instance_name", True)),
+            wake_on_bot_name=bool(self.config.get("wake_on_bot_name", True)),
+            name_min_len=int(self.config.get("wake_name_min_len", 2) or 2),
         )
 
     def _wake_names_for(self, event: AstrMessageEvent) -> list:
@@ -232,19 +248,25 @@ class FullPromptPlugin(Star):
                     names.append(text)
         except BaseException:  # noqa: BLE001
             pass
-        try:
-            umo = str(getattr(event, "unified_msg_origin", "") or "")
-            head = umo.split(":", 1)[0].strip()
-            if head and self._is_name_like(head):
-                names.append(head)
-        except BaseException:  # noqa: BLE001
-            pass
-        try:
-            text = str(self.config.get("bot_name", "") or "").strip()
-            if text and self._is_name_like(text):
-                names.append(text)
-        except BaseException:  # noqa: BLE001
-            pass
+        if _WAKE_ON_INSTANCE_NAME:
+            # 实例名不是框架概念，是这个插件额外收进来的：很多人实例名就是 bot 名字。
+            # 但实例名叫 default / salt 这类通用词时会误唤醒，所以给了开关。
+            try:
+                umo = str(getattr(event, "unified_msg_origin", "") or "")
+                head = umo.split(":", 1)[0].strip()
+                if head and self._is_name_like(head):
+                    names.append(head)
+            except BaseException:  # noqa: BLE001
+                pass
+        if _WAKE_ON_BOT_NAME:
+            # bot_name 同时也是「她被 @ 时怎么称呼」的来源，所以关掉它只影响唤醒，
+            # 称呼照旧。想要「只有写死的唤醒词能叫动她」时关这个。
+            try:
+                text = str(self.config.get("bot_name", "") or "").strip()
+                if text and self._is_name_like(text):
+                    names.append(text)
+            except BaseException:  # noqa: BLE001
+                pass
         out = []
         for n in names:
             if n not in out:
