@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .git/
 
-# 运行时副本/备份不要进仓库；data/t2i_templates/ 是插件自带素材，要保留
-data/cmd_config.json
+# 运行时副本/备份不要进仓库
 *.bak*
+
+# data/ 是 AstrBot 自己的数据目录（t2i 模板等），不属于插件，整目录忽略
+data/
