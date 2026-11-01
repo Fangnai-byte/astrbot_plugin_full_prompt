@@ -38,6 +38,7 @@ _NAME_MIN_LEN = 2               # 名字短于这个长度不参与唤醒（单�
 _NAMES_RESOLVER = None           # 由插件实例注入：event -> [该 bot 的名字...]
 _PATTERN_CACHE: dict = {}        # (规则原文, 昵称) -> 编译后的 Pattern | None
 _NAME_CACHE: dict = {}           # (self_id, group_id) -> ([名字...], 时间)
+_NAME_CACHE_MAX = 512            # 超过就整表清空，防止长期运行无限增长
 
 
 def set_wake_rules(
@@ -120,7 +121,7 @@ def _bot_names(event: AstrMessageEvent) -> list:
         return []
     try:
         key = (str(event.get_self_id() or ""), str(event.get_group_id() or ""))
-    except BaseException:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         key = None
     if key is not None:
         hit = _NAME_CACHE.get(key)
@@ -128,13 +129,16 @@ def _bot_names(event: AstrMessageEvent) -> list:
             return hit[0]
     try:
         names = [str(x).strip() for x in (_NAMES_RESOLVER(event) or []) if str(x or "").strip()]
-    except BaseException:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         names = []
     out = []
     for n in names:
         if n not in out:
             out.append(n)
     if key is not None:
+        # 缓存没有上限的话，bot 跑在很多群里会一直长；超过就整表清掉，重建很便宜
+        if len(_NAME_CACHE) >= _NAME_CACHE_MAX:
+            _NAME_CACHE.clear()
         _NAME_CACHE[key] = (out, time.time())
     return out
 
@@ -154,7 +158,7 @@ class WakePatternFilter(CustomFilter):
         event.is_at_or_wake_command = True
         try:
             event.set_extra("full_prompt_wake_by", how)
-        except BaseException:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             pass
         # INFO 级：平时不响，真被叫到时留一行，方便排查「为什么没反应」
         logger.info(
@@ -174,7 +178,7 @@ class WakePatternFilter(CustomFilter):
             return False
         try:
             self_id = str(event.get_self_id() or "").strip()
-        except BaseException:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self_id = ""
 
         # ① 名字出现在任意位置
@@ -228,7 +232,7 @@ class FullPromptPlugin(Star):
                 text = str(w or "").strip()
                 if text and self._is_name_like(text):
                     names.append(text)
-        except BaseException:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             pass
         # ★ 只取**属于这个 bot**的名字。
         #   这里曾经把 bot_name_map / bot_name_by_self_id 的所有值都收进来，
@@ -239,14 +243,14 @@ class FullPromptPlugin(Star):
         self_id = ""
         try:
             self_id = str(event.get_self_id() or "").strip()
-        except BaseException:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             self_id = ""
         try:
             if self_id:
                 text = str(self._parse_bot_self_map().get(self_id) or "").strip()
                 if text and self._is_name_like(text):
                     names.append(text)
-        except BaseException:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             pass
         if _WAKE_ON_INSTANCE_NAME:
             # 实例名不是框架概念，是这个插件额外收进来的：很多人实例名就是 bot 名字。
@@ -256,7 +260,7 @@ class FullPromptPlugin(Star):
                 head = umo.split(":", 1)[0].strip()
                 if head and self._is_name_like(head):
                     names.append(head)
-            except BaseException:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
         if _WAKE_ON_BOT_NAME:
             # bot_name 同时也是「她被 @ 时怎么称呼」的来源，所以关掉它只影响唤醒，
@@ -265,7 +269,7 @@ class FullPromptPlugin(Star):
                 text = str(self.config.get("bot_name", "") or "").strip()
                 if text and self._is_name_like(text):
                     names.append(text)
-            except BaseException:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 pass
         out = []
         for n in names:
@@ -342,16 +346,21 @@ class FullPromptPlugin(Star):
             or getattr(event, "session", "")
             or ""
         )
-        args_list = [(umo,), ()] if umo else [()]
-        for args in args_list:
+        # ★ 2026-11-01 修：原来 umo 取不到配置时会再调一次无参 get_config()，
+        #   那拿到的是**全局**配置档案，读出来的是别人的唤醒词 —— 多 bot 同实例时会
+        #   让名字表混进别的 bot 的名字。现在只按 umo 取，取不到就返回空：
+        #   宁可这次不补全，也不要读错档案。
+        if not umo:
             try:
-                conf = get_config(*args)
-            except BaseException as e:
-                logger.debug(f"[full_prompt] 读取 AstrBot 配置失败(umo={umo!r}): {e}")
-                continue
-            if conf:
-                return conf
-        return {}
+                return get_config() or {}
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"[full_prompt] 读取全局配置失败: {e}")
+                return {}
+        try:
+            return get_config(umo) or {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"[full_prompt] 读取 AstrBot 配置失败(umo={umo!r}): {e}")
+            return {}
 
     def _get_wake_words(self, event: AstrMessageEvent) -> list:
         """本会话可用的唤醒词（保序去重，前面的优先）。
@@ -386,12 +395,24 @@ class FullPromptPlugin(Star):
 
     def _typed_wake_word(self, event: AstrMessageEvent, wake_words: list) -> str:
         """用户原文里自己打出来的唤醒词。
-        AstrBot 的唤醒检测会把它从 event.message_str 里剥掉，但它还留在原始消息链里；按最长匹配认出来。"""
+
+        AstrBot 的唤醒检测会把它从 event.message_str 里剥掉，但它还留在原始消息链里。
+        先按开头匹配（那是框架真正会剥的位置），没命中再在整段纯文本里找 —— 否则
+        「@机器人 今天宁宁怎么样」这种句中喊名字的消息会被判成「没叫过」，
+        补全时又多插一个名字，模型会以为有两个人在叫它。
+        """
+        ordered = sorted(wake_words, key=len, reverse=True)
         head = self._leading_text(event)
-        if not head:
-            return ""
-        for word in sorted(wake_words, key=len, reverse=True):
-            if word and head.startswith(word):
+        if head:
+            for word in ordered:
+                if word and head.startswith(word):
+                    return word
+        body = ""
+        for c in getattr(event.message_obj, "message", []) or []:
+            if isinstance(c, Plain):
+                body += str(getattr(c, "text", "") or "")
+        for word in ordered:
+            if word and len(word) >= _NAME_MIN_LEN and word in body:
                 return word
         return ""
 
@@ -418,7 +439,7 @@ class FullPromptPlugin(Star):
     ) -> str:
         """@机器人 时代入的兜底名字（唤醒词）——只在平台没给 At 名字时用。
         优先级：按群 bot_name_map > 按Bot bot_name_by_self_id >
-        本会话配置档案里第一个像名字的唤醒词 > bot_name > 默认宁宁。"""
+        本会话配置档案里第一个像名字的唤醒词 > bot_name > 默认小助手。"""
         gid = str(event.get_group_id() or "")
         if gid:
             name = self._parse_bot_name_map().get(gid)
@@ -590,5 +611,5 @@ class FullPromptPlugin(Star):
                     f"[full_prompt] 跳过补全：prompt={req.prompt!r} 不是重建文本 "
                     f"{user_text!r} 的结尾/片段（骨架={skeleton!r}）",
                 )
-        except BaseException as e:
+        except Exception as e:
             logger.debug(f"[full_prompt] 处理失败: {e}")
