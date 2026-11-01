@@ -505,15 +505,25 @@ class FullPromptPlugin(Star):
 
     @staticmethod
     def _leading_is_at(event: AstrMessageEvent) -> bool:
-        """消息的**第一个有内容的组件**是不是 @（At / At全体）。
+        """消息的**第一个有内容的组件**是不是 @**机器人本人**。
 
         前面可能有空白的纯文本段（有些人习惯先打空格再 @），跳过它们再判断。
-        给 `skip_at_leading` 用：开着且句首是 @ 时不补全。
+        给 `skip_at_leading` 用：开着且句首 @ 的是本人时不补全。
+
+        ★ 2026-11-01 修（另一实例的同类漏洞，用户要求同步）：原来判
+        `isinstance(c, (At, AtAll))` —— **@ 别人也算**，于是「@某人 宁宁你看看」
+        这种句首 @ 别人的消息会跟着跳过补全，机器人可能收不到被剥掉的名字。
+        现在只认 `At.qq == self_id`；`@全体` 不算 @ 本人。
         """
+        self_id = str(getattr(event, "get_self_id", lambda: "")() or "")
         for c in getattr(event.message_obj, "message", []) or []:
             if isinstance(c, Plain) and not str(getattr(c, "text", "") or "").strip():
                 continue
-            return isinstance(c, (At, AtAll))
+            if isinstance(c, AtAll):
+                return False                      # @全体 ≠ @ 我
+            if isinstance(c, At):
+                return bool(self_id) and str(getattr(c, "qq", "") or "") == self_id
+            return False                          # 第一个有内容的是文本/图片 → 不是句首 @
         return False
 
     @staticmethod
