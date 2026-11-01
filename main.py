@@ -464,6 +464,35 @@ class FullPromptPlugin(Star):
             return ""
         return name
 
+    @staticmethod
+    def _quote_text(c, limit: int = 200) -> str:
+        """取出被引用消息的正文（纯文本部分），取不到返回空串。
+
+        只在私聊里用：群聊时 `group_chat_context` 会自己注入 `[Quote(昵称: …)]`，
+        这边再写一遍就是重复占 token。
+        """
+        for attr in ("message_str", "text"):
+            value = getattr(c, attr, "")
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                return text[:limit] + ("…" if len(text) > limit else "")
+        chain = getattr(c, "chain", None)
+        if chain is not None:
+            items = getattr(chain, "chain", chain)
+            if isinstance(items, (list, tuple)):
+                buf = ""
+                for comp in items:
+                    if isinstance(comp, Plain):
+                        buf += str(getattr(comp, "text", "") or "")
+                    elif isinstance(comp, Image):
+                        buf += "[图片]"
+                    elif isinstance(comp, Record):
+                        buf += "[语音]"
+                buf = buf.strip()
+                if buf:
+                    return buf[:limit] + ("…" if len(buf) > limit else "")
+        return ""
+
     def _get_bot_name(
         self,
         event: AstrMessageEvent,
@@ -537,7 +566,15 @@ class FullPromptPlugin(Star):
                     at_name = self._platform_at_name(c)
                     parts.append(f"@{at_name}({qq})" if at_name else f"[At:{qq}]")
             elif isinstance(c, Reply):
-                parts.append("")
+                # 群聊里 group_chat_context 会注入 [Quote(昵称: …)]，这里再写就重复了；
+                # 私聊没有那套上下文，被引用的原文会整个丢掉，所以补一行。
+                if event.is_private_chat():
+                    quote = self._quote_text(c)
+                    if quote:
+                        who = str(getattr(c, "sender_nickname", "") or "").strip()
+                        parts.append(f"[引用 {who}: {quote}] " if who else f"[引用: {quote}] ")
+                else:
+                    parts.append("")
             elif isinstance(c, Image):
                 parts.append("[图片]")
             elif isinstance(c, Face):
