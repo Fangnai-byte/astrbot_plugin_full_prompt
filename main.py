@@ -16,6 +16,38 @@ DEFAULT_BOT_NAME = "小助手"
 # 「成员A @机器人 分组名单；…」框架把 @自己 那段删了，重建版用 [At:qq]，护栏判不中）。
 _AT_TOKEN_RE = re.compile(r"\[At:[^\]]*\]|@[^\s@()（）]+(?:\([^)]*\))?")
 
+# 没单独处理的组件，别让模型看到 `[ComponentType.Video]` 这种枚举名
+_COMPONENT_LABELS = {
+    "Video": "[视频]",
+    "File": "[文件]",
+    "Json": "[卡片消息]",
+    "Forward": "[合并转发]",
+    "Node": "[转发节点]",
+    "Nodes": "[转发节点]",
+    "Contact": "[名片]",
+    "Music": "[音乐]",
+    "Location": "[位置]",
+    "Poke": "[戳一戳]",
+    "Dice": "[骰子]",
+    "RPS": "[猜拳]",
+    "Shake": "[窗口抖动]",
+    "Share": "[链接]",
+    "Unknown": "[未知消息]",
+}
+
+
+def _component_label(c) -> str:
+    """把组件类型渲染成模型看得懂的短语。
+
+    原来直接 `f"[{c.type}]"`，枚举的 str() 是 `ComponentType.Video`，
+    提示词里就会出现这种半截英文，模型只能猜。
+    """
+    raw = getattr(c, "type", None)
+    name = getattr(raw, "value", raw) or "Unknown"
+    if not isinstance(name, str):
+        name = str(name)
+    return _COMPONENT_LABELS.get(name, f"[{name}]")
+
 # ---------------- 名字出现在句子里就算叫她 ----------------
 # AstrBot 的唤醒前缀只认**开头**（`/宁宁 在吗`），中间的看不见。
 # 这里用自定义 filter：它在唤醒检查阶段被调用，命中就把这条消息标成「被唤醒」，
@@ -513,8 +545,9 @@ class FullPromptPlugin(Star):
             elif isinstance(c, Record):
                 parts.append("[语音]")
             else:
-                parts.append(f"[{getattr(c, 'type', '未知组件')}]")
-        return "".join(parts).strip(), "".join(plain).strip()
+                parts.append(_component_label(c))
+        full = re.sub(r"[ 	]{2,}", " ", "".join(parts)).strip()
+        return full, "".join(plain).strip()
 
     def _rebuild_text(
         self,
