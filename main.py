@@ -9,7 +9,7 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.provider import ProviderRequest
 from astrbot.core.message.components import At, AtAll, Plain, Reply, Image, Face, Record
 
-DEFAULT_BOT_NAME = "宁宁"
+DEFAULT_BOT_NAME = "小助手"
 
 # At 记号的两种写法：我们重建的 `[At:qq]`，以及框架 message_str 里的 `@昵称(qq)`。
 # 比对 prompt 与重建文本前统一剥掉，否则多重 @ 的消息永远对不上（2026-10-20 实测：

@@ -119,7 +119,7 @@ AstrBot 只认开头的唤醒词和 @。她叫小助手时，`小助手在吗` �
 
 ```
 按群 bot_name_map > 按Bot bot_name_by_self_id
-> 该会话配置档案里第一个像名字的唤醒词 > bot_name > 默认为「宁宁」
+> 该会话配置档案里第一个像名字的唤醒词 > bot_name > 默认为「小助手」
 ```
 
 「像名字」指含字母、数字或汉字，`/` 这类纯符号不算。
@@ -136,7 +136,7 @@ AstrBot 只认开头的唤醒词和 @。她叫小助手时，`小助手在吗` �
 | 配置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `auto_wake_word` | bool | `true` | 自动读 AstrBot 里该会话配置的那串唤醒词（推荐开着） |
-| `bot_name` | string | `宁宁` | 最后兜底，平台没给 @ 名字、该会话也没配唤醒词时用 |
+| `bot_name` | string | `小助手` | 最后兜底，平台没给 @ 名字、该会话也没配唤醒词时用 |
 | `extra_wake_words` | list | 空 | AstrBot 里没配、但插件也想认的唤醒词，一般留空 |
 | `wake_on_name` | bool | `true` | 名字出现在消息任意位置就算叫她；关掉后只认 AstrBot 的前缀和 @ |
 | `wake_on_instance_name` | bool | `true` | 平台实例名（如 `绫地宁宁`）也当一个名字用 |

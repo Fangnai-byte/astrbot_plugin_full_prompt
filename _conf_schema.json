@@ -7,9 +7,9 @@
   },
   "bot_name": {
     "description": "默认昵称/唤醒词（最后兜底）",
-    "hint": "当平台没给 @ 名字、AstrBot 该会话也没配唤醒词、上面都没指定时用的名字。留空则用「宁宁」。",
+    "hint": "平台没给 @ 名字、AstrBot 该会话也没配唤醒词、上面都没指定时用的名字。留空则用「小助手」",
     "type": "string",
-    "default": "宁宁"
+    "default": "小助手"
   },
   "extra_wake_words": {
     "description": "额外补充的唤醒词",
